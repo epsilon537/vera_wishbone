@@ -56,7 +56,7 @@ module vram_if #(
   // Time slotted memory access: Four time slots, one clock period each,
   // each slot assigned to one port.
   // => Each port is guaranteed 25% of the main RAM bus bandwidth. No more,
-  // no less, indepedent of the other ports' activities.
+  // no less, independent of the other ports' activities.
   //////////////////////////////////////////////////////////////////////////
   reg if0_ack_next;
   reg if1_ack_next;
