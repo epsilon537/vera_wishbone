@@ -9,15 +9,15 @@ module vera_top #(
 
     //32-bit pipelined Wishbone interface.
     input wire [16:0]  wb_adr,
-  input wire [31:0]  wb_dat_w,
-  output wire [31:0] wb_dat_r,
-  input wire [3:0]   wb_sel,
+    input wire [31:0]  wb_dat_w,
+    output wire [31:0] wb_dat_r,
+    input wire [3:0]   wb_sel,
     output wire        wb_stall,
-  input wire         wb_cyc,
-  input wire         wb_stb,
-  output wire        wb_ack,
-  input wire         wb_we,
-  output wire        wb_err,
+    input wire         wb_cyc,
+    input wire         wb_stb,
+    output wire        wb_ack,
+    input wire         wb_we,
+    output wire        wb_err,
 
     // IRQ
     output wire        irq_n,
@@ -41,8 +41,12 @@ module vera_top #(
     //////////////////////////////////////////////////////////////////////////
     // Bus accessible registers
     //////////////////////////////////////////////////////////////////////////
+    wire [15:0] capture_ram_dat_r;
     wire [31:0] vram_dat_r;
+    wire       capture_complete_stb;
+
     reg        sprite_bank_select_r,          sprite_bank_select_next;
+    reg        capture_en_r,                  capture_en_next;
     reg        irq_enable_vsync_r,            irq_enable_vsync_next;
     reg        irq_enable_line_r,             irq_enable_line_next;
     reg        irq_enable_sprite_collision_r, irq_enable_sprite_collision_next;
@@ -122,7 +126,7 @@ module vera_top #(
 
         if (wb_stb && !wb_we) begin
             case (wb_adr[5:0])
-                6'h00: reg_rddata = {31'b0, sprite_bank_select_r};
+                6'h00: reg_rddata = {30'b0, capture_en_r, sprite_bank_select_r};
 
                 6'h01: reg_rddata = {24'b0, dc_border_color_r};
 
@@ -171,8 +175,9 @@ module vera_top #(
         end
     end
 
-    //Only registers and VRAM are readable. Palette and Sprite RAM not.
-    assign wb_dat_r = (wb_adr < 17'h1000>>2) ? reg_rddata : vram_dat_r;
+    //Only registers, capture RAM and VRAM are readable. Palette and Sprite RAM are not.
+    assign wb_dat_r = (wb_adr < 17'h1000>>2) ? reg_rddata :
+      (wb_adr < 17'h4000>>2) ? {16'b0, capture_ram_dat_r} : vram_dat_r;
 
     wire [3:0] irq_enable = {
 `ifdef VERA_AUDIO
@@ -194,13 +199,15 @@ module vera_top #(
     /*Wishbone interfacing*/
     reg [5:0] wraddr_r;
     reg [31:0] wrdata_r;
-    reg do_reg_read, do_reg_write;
+    reg do_reg_read, do_reg_write, do_capture_read_r;
     reg spr_pal_ram_wb_ack_r;
     wire vram_ack;
+    wire do_capture_read;
 
     always @(posedge clk) begin
         do_reg_read <= 1'b0;
         do_reg_write <= 1'b0;
+        do_capture_read_r <= do_capture_read;
         //register write
         if (!do_reg_write && wb_stb && wb_we && (wb_adr < 17'h1000>>2)) begin
             wrdata_r <= wb_dat_w;
@@ -212,14 +219,18 @@ module vera_top #(
         if (!do_reg_read && wb_stb && !wb_we && (wb_adr < 17'h1000>>2)) begin
             do_reg_read <= 1'b1;
         end
+
     end
 
-    assign wb_ack = (do_reg_read | do_reg_write | vram_ack | spr_pal_ram_wb_ack_r) & wb_cyc;
+    assign do_capture_read = wb_stb && !wb_we && (wb_adr >= 17'h3000>>2) && (wb_adr < 17'h3a00>>2);
+    assign wb_ack = (do_capture_read_r | do_reg_read |
+      do_reg_write | vram_ack | spr_pal_ram_wb_ack_r) & wb_cyc;
     assign wb_err = 1'b0;
     assign wb_stall = !wb_cyc ? 1'b0 : !wb_ack;
 
     always @* begin
         sprite_bank_select_next          = sprite_bank_select_r;
+        capture_en_next                  = capture_en_r;
 `ifdef VERA_AUDIO
         irq_enable_audio_fifo_low_next   = irq_enable_audio_fifo_low_r;
 `endif
@@ -277,9 +288,15 @@ module vera_top #(
         audio_fifo_write_next            = 0;
 `endif
 
+        if (capture_complete_stb)
+          capture_en_next = 0;
+
         if (do_reg_write) begin
             case (wraddr_r[5:0])
-                6'h00: sprite_bank_select_next = wrdata_r[0];
+                6'h00: begin
+                    sprite_bank_select_next = wrdata_r[0];
+                    capture_en_next = wrdata_r[1];
+                end
                 6'h01: dc_border_color_next    = wrdata_r[7:0];
                 6'h02: begin
 `ifdef VERA_AUDIO
@@ -374,8 +391,8 @@ module vera_top #(
 
     always @(posedge clk) begin
         if (reset) begin
-
             sprite_bank_select_r          <= 0;
+            capture_en_r                  <= 0;
 `ifdef VERA_AUDIO
             irq_enable_audio_fifo_low_r   <= 0;
 `endif
@@ -433,6 +450,7 @@ module vera_top #(
 `endif
         end else begin
             sprite_bank_select_r          <= sprite_bank_select_next;
+            capture_en_r                  <= capture_en_next;
 `ifdef VERA_AUDIO
             irq_enable_audio_fifo_low_r   <= irq_enable_audio_fifo_low_next;
 `endif
@@ -559,7 +577,7 @@ module vera_top #(
 `ifdef SYS_CLK_25MHZ
     reg clk_en=1;
 `else
-    reg clk_en=0;
+    reg clk_en=1;
 `endif
     //This piece of sequential logic needs to run at pixel clock rate, i.e. 1/2 the master clock rate.
     //Hence the clk_en.
@@ -569,7 +587,7 @@ module vera_top #(
 `ifdef SYS_CLK_25MHZ
             clk_en <= 1;
 `else
-            clk_en <= 0;
+            clk_en <= 1;
 `endif
         end else begin
 `ifndef SYS_CLK_25MHZ
@@ -901,6 +919,14 @@ module vera_top #(
     video_vga video_vga(
         .rst(reset),
         .clk(clk),
+
+        // The capture interface
+        .capture_en_i(capture_en_r),
+        .capture_line_i(irq_line_r),
+        .capture_rd_en_i(do_capture_read),
+        .capture_rd_addr_i(wb_adr[9:0]),
+        .capture_rd_data_o(capture_ram_dat_r),
+        .capture_complete_stb_o(capture_complete_stb),
 
         // Palette interface
         .palette_rgb_data(palette_rgb_data[11:0]),

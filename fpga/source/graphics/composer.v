@@ -49,7 +49,7 @@ module composer (
 `ifdef SYS_CLK_25MHZ
   reg clk_en = 1;
 `else
-  reg clk_en = 0;
+  reg clk_en = 1;
 `endif
   reg [16:0] scaled_x_counter_r;
   wire [9:0] scaled_x_counter = scaled_x_counter_r[16:7];
@@ -85,7 +85,7 @@ module composer (
 `ifdef SYS_CLK_25MHZ
       clk_en <= 1;
 `else
-      clk_en <= 0;
+      clk_en <= 1;
 `endif
       y_counter_r   <= 0;
       y_counter_rr  <= 0;
@@ -156,7 +156,7 @@ module composer (
   wire hactive = (x_counter >= active_hstart) && (x_counter < active_hstop);
   wire vactive = (y_counter >= {1'b0, active_vstart}) && (y_counter < {1'b0, active_vstop});
   reg  display_active;
-  always @(posedge clk) if (clk_en) display_active <= hactive && vactive;
+  always @(posedge clk) display_active <= hactive && vactive;
 
   // Scaled vertical counter
   reg vactive_started_r;

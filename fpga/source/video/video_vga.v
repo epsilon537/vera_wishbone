@@ -4,6 +4,15 @@ module video_vga (
     input wire rst,
     input wire clk,
 
+    // The capture interface
+    input wire       capture_en_i,
+    input wire [9:0] capture_line_i,
+
+    input  wire        capture_rd_en_i,
+    input  wire [ 9:0] capture_rd_addr_i,
+    output wire [15:0] capture_rd_data_o,
+    output wire        capture_complete_stb_o,
+
     // Palette interface
     input wire [11:0] palette_rgb_data,
 
@@ -41,7 +50,7 @@ module video_vga (
 `ifdef SYS_CLK_25MHZ
   reg clk_en = 1;
 `else
-  reg clk_en = 0;
+  reg clk_en = 1;
 `endif
   wire h_last = (x_counter == H_TOTAL - 1);
   wire v_last = (y_counter == V_TOTAL - 1);
@@ -63,7 +72,7 @@ module video_vga (
 `ifdef SYS_CLK_25MHZ
       clk_en <= 1;
 `else
-      clk_en <= 0;
+      clk_en <= 1;
 `endif
 
     end else begin
@@ -83,7 +92,22 @@ module video_vga (
   wire h_active = (x_counter < H_ACTIVE);
   wire v_active = (y_counter < V_ACTIVE);
   wire active = h_active && v_active;
+  wire capture_en = (y_counter == capture_line_i) && active_r[0] && capture_en_i;
 
+  //The capture RAM instance.
+  capture_ram capture_ram_inst (
+      .clk_i(clk),
+      .clk_en_i(clk_en),
+      .rd_en_i(capture_rd_en_i),
+      .wr_en_i(capture_en),
+      .wr_data_i({4'b0, palette_rgb_data}),
+      .wr_addr_i(x_counter - 10'd1),
+      .rd_addr_i(capture_rd_addr_i),
+      .rd_data_o(capture_rd_data_o)
+  );
+
+  assign capture_complete_stb_o = (y_counter ==
+    capture_line_i) && capture_en_i && (x_counter == H_ACTIVE);
   assign vblank_pulse = h_last && (y_counter == V_ACTIVE - 1);
 
   assign next_frame = h_last && v_last2;
