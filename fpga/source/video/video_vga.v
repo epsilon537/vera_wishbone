@@ -45,13 +45,11 @@ module video_vga (
   parameter V_TOTAL = V_ACTIVE + V_FRONT_PORCH + V_SYNC + V_BACK_PORCH;
 
   reg [9:0] x_counter = 0;
+  reg [9:0] capture_wr_addr = H_TOTAL - 1;
   reg [9:0] y_counter = 0;
 
-`ifdef SYS_CLK_25MHZ
   reg clk_en = 1;
-`else
-  reg clk_en = 1;
-`endif
+  wire wr_last = (capture_wr_addr == H_TOTAL - 1);
   wire h_last = (x_counter == H_TOTAL - 1);
   wire v_last = (y_counter == V_TOTAL - 1);
   wire v_last2 = (y_counter == V_TOTAL - 2);  // Start rendering one line earlier
@@ -62,18 +60,10 @@ module video_vga (
 
   always @(posedge clk) begin
     if (rst) begin
-`ifdef __ICARUS__  /*not needed for Verilator*/
-      x_counter <= 10'd0;  //750;
-      y_counter <= 10'd0;  //523;
-`else
+      capture_wr_addr <= H_TOTAL - 1;
       x_counter <= 10'd0;
       y_counter <= 10'd0;
-`endif
-`ifdef SYS_CLK_25MHZ
       clk_en <= 1;
-`else
-      clk_en <= 1;
-`endif
 
     end else begin
 `ifndef SYS_CLK_25MHZ
@@ -81,6 +71,7 @@ module video_vga (
 `endif
 
       if (clk_en) begin
+        capture_wr_addr <= wr_last ? 10'd0 : (capture_wr_addr + 10'd1);
         x_counter <= h_last ? 10'd0 : (x_counter + 10'd1);
         if (h_last) y_counter <= v_last ? 10'd0 : (y_counter + 10'd1);
       end
@@ -89,25 +80,25 @@ module video_vga (
 
   wire hsync    = (x_counter >= H_ACTIVE + H_FRONT_PORCH && x_counter < H_ACTIVE + H_FRONT_PORCH + H_SYNC);
   wire vsync    = (y_counter >= V_ACTIVE + V_FRONT_PORCH && y_counter < V_ACTIVE + V_FRONT_PORCH + V_SYNC);
+  wire capture_wr_active = (y_counter == capture_line_i) && (capture_wr_addr < H_ACTIVE);
   wire h_active = (x_counter < H_ACTIVE);
   wire v_active = (y_counter < V_ACTIVE);
   wire active = h_active && v_active;
-  wire capture_en = (y_counter == capture_line_i) && active_r[0] && capture_en_i;
 
   //The capture RAM instance.
   capture_ram capture_ram_inst (
       .clk_i(clk),
       .clk_en_i(clk_en),
       .rd_en_i(capture_rd_en_i),
-      .wr_en_i(capture_en),
+      .wr_en_i(capture_wr_active),
       .wr_data_i({4'b0, palette_rgb_data}),
-      .wr_addr_i(x_counter - 10'd1),
+      .wr_addr_i(capture_wr_addr),
       .rd_addr_i(capture_rd_addr_i),
       .rd_data_o(capture_rd_data_o)
   );
 
   assign capture_complete_stb_o = (y_counter ==
-    capture_line_i) && capture_en_i && (x_counter == H_ACTIVE);
+    capture_line_i) && capture_en_i && (capture_wr_addr == H_ACTIVE);
   assign vblank_pulse = h_last && (y_counter == V_ACTIVE - 1);
 
   assign next_frame = h_last && v_last2;
