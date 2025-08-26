@@ -129,20 +129,16 @@ module sprite_renderer (
     case (sf_state_next)
       // Find a sprite to be rendered
       SF_FIND_SPRITE: begin
-        if ((sprite_idx_r[6] == 1'b1) || (sprite_pixel_count_r >= SPRITE_PIXEL_COUNT_MAX)) begin
-          sf_state_next = SF_DONE;
-
-        end else begin
-          if (sprite_enabled && sprite_on_line) begin
-            if (!render_busy) begin
-              sprite_attr_sel_next = 0;
-              save_hi              = 1;
-              sf_state_next        = SF_START_RENDER;
-            end
-
-          end else begin
-            sprite_idx_next = sprite_idx_incr;
+        if (sprite_enabled && sprite_on_line) begin
+          if (!render_busy) begin
+            sprite_attr_sel_next = 0;
+            save_hi              = 1;
+            sf_state_next        = SF_START_RENDER;
           end
+        end else begin
+          sprite_idx_next = sprite_idx_incr;
+          if ((sprite_idx_incr[6] == 1'b1) || (sprite_pixel_count_r >= SPRITE_PIXEL_COUNT_MAX))
+            sf_state_next = SF_DONE;
         end
       end
 
@@ -154,22 +150,23 @@ module sprite_renderer (
         sf_state_next           = SF_FIND_SPRITE;
         start_render_next       = 1;
         sprite_idx_next         = sprite_idx_incr;
+        if ((sprite_idx_incr[6] == 1'b1) || (sprite_pixel_count_r >= SPRITE_PIXEL_COUNT_MAX))
+          sf_state_next = SF_DONE;
       end
 
       // Wait for the next line
       SF_DONE: begin
+        if (line_render_start) begin
+          sf_state_next           = SF_FIND_SPRITE;
+          sprite_idx_next         = 0;
+          start_render_next       = 0;
+          sprite_pixel_count_next = 0;
+        end
       end
 
       default: begin
       end
     endcase
-
-    if (line_render_start) begin
-      sf_state_next           = SF_FIND_SPRITE;
-      sprite_idx_next         = 0;
-      start_render_next       = 0;
-      sprite_pixel_count_next = 0;
-    end
   end
 
   always @(posedge clk) begin
